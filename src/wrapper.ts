@@ -15,6 +15,17 @@ const DEFAULT_SEPARATOR = "__";
 const DEFAULT_VERSION = "1.0.0";
 const SERVER_CLOSE_TIMEOUT_MS = 5000;
 
+/**
+ * Error class for server configuration validation errors
+ * These errors should fail fast and not be caught by resilient connection handling
+ */
+class ConfigurationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ConfigurationError';
+  }
+}
+
 interface ConnectedServer {
   config: WrappedServerConfig;
   client: Client;
@@ -30,6 +41,7 @@ export class McpWrapper {
   private config: WrapperConfig;
   private separator: string;
   private connectedServers: Map<string, ConnectedServer> = new Map();
+  private failedServers: Map<string, { config: WrappedServerConfig; error: string }> = new Map();
   private server: Server;
   private toolToServerMap: Map<string, { serverName: string; originalName: string }> = new Map();
 
@@ -39,7 +51,24 @@ export class McpWrapper {
 
     // Validate server names don't contain separator and are unique
     const seenServerNames = new Set<string>();
+    const reservedNames = ['wrapper'];
+    
     for (const serverConfig of config.servers) {
+      // Validate required fields
+      if (!serverConfig.name || typeof serverConfig.name !== 'string') {
+        throw new Error(
+          `Invalid server configuration: each server must have a 'name' field (string)`
+        );
+      }
+      
+      // Check for reserved names
+      const lowerName = serverConfig.name.toLowerCase();
+      if (reservedNames.includes(lowerName)) {
+        throw new Error(
+          `Invalid server name "${serverConfig.name}": server name cannot be "wrapper" as it is reserved for wrapper management tools`
+        );
+      }
+      
       if (!isValidServerName(serverConfig.name, this.separator)) {
         throw new Error(
           `Invalid server name "${serverConfig.name}": server names cannot contain the separator "${this.separator}"`
@@ -95,13 +124,13 @@ export class McpWrapper {
     const hasUrl = !!serverConfig.url;
 
     if (!hasCommand && !hasUrl) {
-      throw new Error(
+      throw new ConfigurationError(
         `Server "${serverConfig.name}" must specify either "command" or "url"`
       );
     }
 
     if (hasCommand && hasUrl) {
-      throw new Error(
+      throw new ConfigurationError(
         `Server "${serverConfig.name}" cannot specify both "command" and "url"`
       );
     }
@@ -113,7 +142,7 @@ export class McpWrapper {
       try {
         transport = new SSEClientTransport(new URL(serverConfig.url));
       } catch (error) {
-        throw new Error(
+        throw new ConfigurationError(
           `Server "${serverConfig.name}" has invalid URL: "${serverConfig.url}"`
         );
       }
@@ -153,43 +182,132 @@ export class McpWrapper {
   }
 
   /**
+   * Registers tool mappings for a connected server
+   */
+  private registerToolMappings(serverName: string, connectedServer: ConnectedServer): void {
+    for (const tool of connectedServer.tools) {
+      const prefixedName = this.prefixToolName(serverName, tool.name);
+      
+      // Warn about tool name collisions
+      if (this.toolToServerMap.has(prefixedName)) {
+        const previous = this.toolToServerMap.get(prefixedName);
+        console.warn(
+          `Tool name collision detected: "${prefixedName}" is being overwritten. ` +
+          `Previous: server "${previous?.serverName}", tool "${previous?.originalName}". ` +
+          `New: server "${serverName}", tool "${tool.name}".`
+        );
+      }
+      
+      this.toolToServerMap.set(prefixedName, {
+        serverName: serverName,
+        originalName: tool.name,
+      });
+    }
+  }
+
+  /**
+   * Helper method to connect and register a server
+   */
+  private async connectAndRegisterServer(
+    serverName: string,
+    serverConfig: WrappedServerConfig
+  ): Promise<{ success: boolean; message: string }> {
+    try {
+      const connectedServer = await this.connectToServer(serverConfig);
+      this.connectedServers.set(serverName, connectedServer);
+      this.failedServers.delete(serverName);
+      this.registerToolMappings(serverName, connectedServer);
+      
+      console.error(`Connected to server "${serverName}" with ${connectedServer.tools.length} tools`);
+      return {
+        success: true,
+        message: `Successfully connected to server "${serverName}" with ${connectedServer.tools.length} tool(s)`,
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.failedServers.set(serverName, {
+        config: serverConfig,
+        error: errorMessage,
+      });
+      return {
+        success: false,
+        message: `Failed to connect to server "${serverName}": ${errorMessage}`,
+      };
+    }
+  }
+
+  /**
+   * Reconnects to a specific server by name
+   */
+  async reconnectServer(serverName: string): Promise<{ success: boolean; message: string }> {
+    // Check if it's already connected
+    if (this.connectedServers.has(serverName)) {
+      return {
+        success: false,
+        message: `Server "${serverName}" is already connected`,
+      };
+    }
+    
+    // Check if server is in failed list
+    const failedServer = this.failedServers.get(serverName);
+    if (failedServer) {
+      return this.connectAndRegisterServer(serverName, failedServer.config);
+    }
+    
+    // Check if it exists in config
+    const serverConfig = this.config.servers.find(s => s.name === serverName);
+    if (!serverConfig) {
+      return {
+        success: false,
+        message: `Server "${serverName}" not found in configuration`,
+      };
+    }
+    
+    return this.connectAndRegisterServer(serverName, serverConfig);
+  }
+
+  /**
    * Connects to all configured underlying MCP servers
+   * Skips servers that fail to connect and tracks them for retry
    */
   async connectToServers(): Promise<void> {
     for (const serverConfig of this.config.servers) {
       try {
         const connectedServer = await this.connectToServer(serverConfig);
         this.connectedServers.set(serverConfig.name, connectedServer);
+        
+        // Remove from failed servers if it was previously failing
+        this.failedServers.delete(serverConfig.name);
 
-        // Register tool mappings with collision detection
-        for (const tool of connectedServer.tools) {
-          const prefixedName = this.prefixToolName(serverConfig.name, tool.name);
-          
-          // Warn about tool name collisions
-          if (this.toolToServerMap.has(prefixedName)) {
-            const previous = this.toolToServerMap.get(prefixedName);
-            console.warn(
-              `Tool name collision detected: "${prefixedName}" is being overwritten. ` +
-              `Previous: server "${previous?.serverName}", tool "${previous?.originalName}". ` +
-              `New: server "${serverConfig.name}", tool "${tool.name}".`
-            );
-          }
-          
-          this.toolToServerMap.set(prefixedName, {
-            serverName: serverConfig.name,
-            originalName: tool.name,
-          });
-        }
+        // Register tool mappings
+        this.registerToolMappings(serverConfig.name, connectedServer);
 
         console.error(`Connected to server "${serverConfig.name}" with ${connectedServer.tools.length} tools`);
       } catch (error) {
-        console.error(`Failed to connect to server "${serverConfig.name}":`, error);
+        // Re-throw configuration errors - these are not recoverable
+        if (error instanceof ConfigurationError) {
+          throw error;
+        }
         
-        // Clean up already connected servers before throwing
-        await this.cleanupConnectedServers();
+        // Handle connection errors - log and continue with other servers
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`Failed to connect to server "${serverConfig.name}": ${errorMessage}`);
         
-        throw error;
+        // Track failed server for potential retry
+        this.failedServers.set(serverConfig.name, {
+          config: serverConfig,
+          error: errorMessage,
+        });
+        
+        // Continue to next server instead of throwing
+        console.error(`Skipping server "${serverConfig.name}", will continue with remaining servers`);
       }
+    }
+    
+    // Log summary
+    console.error(`Successfully connected to ${this.connectedServers.size} server(s)`);
+    if (this.failedServers.size > 0) {
+      console.error(`Failed to connect to ${this.failedServers.size} server(s): ${Array.from(this.failedServers.keys()).join(', ')}`);
     }
   }
 
@@ -228,12 +346,88 @@ export class McpWrapper {
         }
       }
 
+      // Add wrapper management tools
+      allTools.push({
+        name: "wrapper__reconnect_server",
+        description: "Reconnect to a failed MCP server",
+        inputSchema: {
+          type: "object",
+          properties: {
+            serverName: {
+              type: "string",
+              description: "Name of the server to reconnect",
+            },
+          },
+          required: ["serverName"],
+        },
+      });
+
+      allTools.push({
+        name: "wrapper__list_servers",
+        description: "List all configured servers with their connection status",
+        inputSchema: {
+          type: "object",
+          properties: {},
+        },
+      });
+
       return { tools: allTools };
     });
 
     // Handle tools/call request
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { name: prefixedName, arguments: args } = request.params;
+
+      // Handle wrapper management tools
+      if (prefixedName === "wrapper__reconnect_server") {
+        const serverName = (args as any)?.serverName;
+        if (!serverName || typeof serverName !== 'string') {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: "Error: serverName parameter is required and must be a string",
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        const result = await this.reconnectServer(serverName);
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: result.message,
+            },
+          ],
+          isError: !result.success,
+        };
+      }
+
+      if (prefixedName === "wrapper__list_servers") {
+        const serverList = {
+          connected: Array.from(this.connectedServers.entries()).map(([name, server]) => ({
+            name,
+            toolCount: server.tools.length,
+            status: "connected",
+          })),
+          failed: Array.from(this.failedServers.entries()).map(([name, failed]) => ({
+            name,
+            status: "failed",
+            error: failed.error,
+          })),
+        };
+
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify(serverList, null, 2),
+            },
+          ],
+        };
+      }
 
       const mapping = this.lookupToolMapping(prefixedName);
       if (!mapping) {
