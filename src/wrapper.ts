@@ -1,7 +1,8 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
+import { SSEClientTransport, SseError } from "@modelcontextprotocol/sdk/client/sse.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   CallToolRequestSchema,
@@ -29,7 +30,7 @@ class ConfigurationError extends Error {
 interface ConnectedServer {
   config: WrappedServerConfig;
   client: Client;
-  transport: StdioClientTransport | SSEClientTransport;
+  transport: StdioClientTransport | SSEClientTransport | StreamableHTTPClientTransport;
   tools: Tool[];
 }
 
@@ -135,17 +136,22 @@ export class McpWrapper {
       );
     }
 
-    let transport: StdioClientTransport | SSEClientTransport;
+    let transport: StdioClientTransport | SSEClientTransport | StreamableHTTPClientTransport;
+    let parsedUrl: URL | undefined;
 
     if (serverConfig.url) {
-      // Use SSE transport for URL-based servers
+      // Validate URL format
       try {
-        transport = new SSEClientTransport(new URL(serverConfig.url));
+        parsedUrl = new URL(serverConfig.url);
       } catch (error) {
         throw new ConfigurationError(
-          `Server "${serverConfig.name}" has invalid URL: "${serverConfig.url}"`
+          `Server "${serverConfig.name}" has invalid URL format: "${serverConfig.url}"`
         );
       }
+
+      // Try Streamable HTTP first (modern protocol), fall back to SSE (legacy)
+      // Streamable HTTP is the recommended protocol and what VS Code/Claude use
+      transport = new StreamableHTTPClientTransport(parsedUrl);
     } else {
       // Use stdio transport for command-based servers
       // serverConfig.command is guaranteed to exist due to validation above
@@ -167,7 +173,66 @@ export class McpWrapper {
       }
     );
 
-    await client.connect(transport);
+    try {
+      await client.connect(transport);
+    } catch (error) {
+      // If Streamable HTTP fails, try SSE as fallback for legacy servers
+      if (serverConfig.url && parsedUrl && transport instanceof StreamableHTTPClientTransport) {
+        console.warn(`Streamable HTTP connection failed, trying SSE fallback for "${serverConfig.name}"...`);
+        
+        try {
+          // Create a new client for SSE fallback to ensure clean state
+          const sseClient = new Client(
+            {
+              name: `${this.config.name}-client`,
+              version: this.config.version ?? DEFAULT_VERSION,
+            },
+            {
+              capabilities: {},
+            }
+          );
+          transport = new SSEClientTransport(parsedUrl);
+          await sseClient.connect(transport);
+          // Success with SSE fallback - replace the original client
+          Object.assign(client, sseClient);
+          console.warn(`Connected to "${serverConfig.name}" using legacy SSE transport`);
+        } catch (sseError) {
+          // Both transports failed, provide helpful error message
+          if (sseError instanceof SseError) {
+            const statusCode = sseError.code ?? "unknown";
+            
+            if (statusCode === 405) {
+              throw new Error(
+                `Server "${serverConfig.name}" at URL "${serverConfig.url}" returned HTTP 405 (Method Not Allowed). ` +
+                `This URL does not support MCP Streamable HTTP or SSE transports. ` +
+                `Make sure the URL points to an actual MCP server endpoint.`
+              );
+            } else if (statusCode === 404) {
+              throw new Error(
+                `Server "${serverConfig.name}" at URL "${serverConfig.url}" returned HTTP 404 (Not Found). ` +
+                `Please check that the URL is correct and the MCP server is running.`
+              );
+            } else {
+              throw new Error(
+                `Server "${serverConfig.name}" at URL "${serverConfig.url}" failed to connect with HTTP ${statusCode}. ` +
+                `Tried both Streamable HTTP and SSE transports. ` +
+                `Make sure the URL points to a valid MCP server endpoint.`
+              );
+            }
+          }
+          
+          // Re-throw if not an SseError
+          throw new Error(
+            `Server "${serverConfig.name}" at URL "${serverConfig.url}" failed to connect. ` +
+            `Streamable HTTP error: ${error instanceof Error ? error.message : String(error)}. ` +
+            `SSE fallback error: ${sseError instanceof Error ? sseError.message : String(sseError)}`
+          );
+        }
+      } else {
+        // For stdio errors or other failures, re-throw original error
+        throw error;
+      }
+    }
 
     // List tools from the server
     const toolsResult = await client.listTools();
