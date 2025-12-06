@@ -417,6 +417,50 @@ If you're having trouble connecting to a remote server:
 2. Check that the URL is correct and includes the proper path
 3. Ensure your network allows outbound HTTP/HTTPS connections
 4. For local servers, make sure you're using the correct host and port
+## Error Handling and Resilience
+
+The wrapper is designed to be resilient to server connection failures:
+
+### Graceful Degradation
+
+If one or more child servers fail to connect:
+- The wrapper will **continue starting** with the servers that connected successfully
+- Failed connections are logged to stderr with detailed error messages
+- Tools from successfully connected servers remain available
+- The wrapper can operate with a subset of configured servers
+
+This ensures that:
+- A single misconfigured or unavailable server doesn't prevent the wrapper from starting
+- Clients (like Google Antigravity, Claude Desktop, VS Code) can initialize successfully
+- You get clear visibility into which servers are working and which failed
+
+### Connection Timeout
+
+Each child server connection has a **30-second timeout** to prevent the wrapper from hanging indefinitely on unresponsive servers. If a server doesn't respond within this time, the connection is aborted and the wrapper continues with other servers.
+
+### Example Scenarios
+
+**Scenario 1**: One server fails, others succeed
+```
+Failed to connect to server "unavailable": Error: spawn ENOENT
+Skipping server "unavailable", will continue with remaining servers
+Connected to server "github" with 15 tools
+Connected to server "filesystem" with 8 tools
+Successfully connected to 2 server(s)
+Failed to connect to 1 server(s): unavailable
+```
+
+**Scenario 2**: All servers fail
+```
+Failed to connect to server "server1": Error: spawn ENOENT
+Skipping server "server1", will continue with remaining servers
+Failed to connect to server "server2": Connection timeout after 30000ms
+Skipping server "server2", will continue with remaining servers
+Successfully connected to 0 server(s)
+Failed to connect to 2 server(s): server1, server2
+```
+
+Even in scenario 2, the wrapper starts successfully (with 0 tools) rather than crashing, allowing clients to complete initialization and receive clear error messages.
 
 ## API
 

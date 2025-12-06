@@ -15,6 +15,7 @@ import { prefixToolName as utilPrefixToolName, isValidServerName } from "./utils
 const DEFAULT_SEPARATOR = "__";
 const DEFAULT_VERSION = "1.0.0";
 const SERVER_CLOSE_TIMEOUT_MS = 5000;
+const SERVER_CONNECT_TIMEOUT_MS = 30000; // 30 seconds timeout for connecting to child servers
 
 /**
  * Error class for server configuration validation errors
@@ -338,7 +339,22 @@ export class McpWrapper {
   async connectToServers(): Promise<void> {
     for (const serverConfig of this.config.servers) {
       try {
-        const connectedServer = await this.connectToServer(serverConfig);
+        // Add timeout to prevent hanging on slow or unresponsive servers
+        // Assign timeoutId before starting the race to avoid race condition
+        let timeoutId: NodeJS.Timeout;
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          timeoutId = setTimeout(
+            () => reject(new Error(`Connection timeout after ${SERVER_CONNECT_TIMEOUT_MS}ms`)),
+            SERVER_CONNECT_TIMEOUT_MS
+          );
+        });
+        
+        const connectedServer = await Promise.race([
+          this.connectToServer(serverConfig).finally(() => {
+            clearTimeout(timeoutId);
+          }),
+          timeoutPromise,
+        ]);
         this.connectedServers.set(serverConfig.name, connectedServer);
         
         // Remove from failed servers if it was previously failing
@@ -349,12 +365,8 @@ export class McpWrapper {
 
         console.error(`Connected to server "${serverConfig.name}" with ${connectedServer.tools.length} tools`);
       } catch (error) {
-        // Re-throw configuration errors - these are not recoverable
-        if (error instanceof ConfigurationError) {
-          throw error;
-        }
-        
-        // Handle connection errors - log and continue with other servers
+        // Handle all errors gracefully - log and continue with other servers
+        // This includes both configuration errors and connection errors
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error(`Failed to connect to server "${serverConfig.name}": ${errorMessage}`);
         
