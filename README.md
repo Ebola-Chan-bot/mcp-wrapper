@@ -25,10 +25,10 @@ npm install mcp-multiplexer
 npx mcp-multiplexer --config ./config.json
 
 # 使用内联 JSON
-npx mcp-multiplexer --config '{"name":"my-mux","version":"1.0.0","servers":[{"name":"github","command":"npx","args":["-y","@modelcontextprotocol/server-github"]}]}'
+npx mcp-multiplexer --config '{"name":"mcp-multiplexer","version":"1.0.0","servers":[{"name":"github","command":"npx","args":["-y","@modelcontextprotocol/server-github"]}]}'
 
 # 使用环境变量
-export MCP_WRAPPER_CONFIG='{"name":"my-mux","version":"1.0.0","servers":[...]}'
+export MCP_WRAPPER_CONFIG='{"name":"mcp-multiplexer","version":"1.0.0","servers":[...]}'
 npx mcp-multiplexer
 ```
 
@@ -36,7 +36,7 @@ npx mcp-multiplexer
 
 ```json
 {
-  "name": "my-mux",
+  "name": "mcp-multiplexer",
   "version": "1.0.0",
   "separator": "__",
   "servers": [
@@ -66,7 +66,7 @@ npx mcp-multiplexer
 import { McpWrapper } from "mcp-multiplexer";
 
 const wrapper = new McpWrapper({
-  name: "my-mux",
+  name: "mcp-multiplexer",
   version: "1.0.0",
   servers: [
     {
@@ -150,7 +150,7 @@ interface WrappedServerConfig {
 ```json
 {
   "mcpServers": {
-    "my-mux": {
+    "mcp-multiplexer": {
       "command": "npx",
       "args": ["-y", "mcp-multiplexer", "--config", "/path/to/config.json"]
     }
@@ -163,9 +163,9 @@ interface WrappedServerConfig {
 ```json
 {
   "mcpServers": {
-    "my-mux": {
+    "mcp-multiplexer": {
       "command": "npx",
-      "args": ["-y", "mcp-multiplexer", "--config", "{\"name\":\"my-mux\",\"version\":\"1.0.0\",\"servers\":[{\"name\":\"github1\",\"command\":\"npx\",\"args\":[\"-y\",\"@modelcontextprotocol/server-github\"],\"env\":{\"GITHUB_TOKEN\":\"token1\"}}]}"]
+      "args": ["-y", "mcp-multiplexer", "--config", "{\"name\":\"mcp-multiplexer\",\"version\":\"1.0.0\",\"servers\":[{\"name\":\"github1\",\"command\":\"npx\",\"args\":[\"-y\",\"@modelcontextprotocol/server-github\"],\"env\":{\"GITHUB_TOKEN\":\"token1\"}}]}"]
     }
   }
 }
@@ -178,7 +178,7 @@ interface WrappedServerConfig {
 ```json
 {
   "servers": {
-    "my-mux": {
+    "mcp-multiplexer": {
       "command": "npx",
       "args": ["-y", "mcp-multiplexer", "--config", "/path/to/config.json"]
     }
