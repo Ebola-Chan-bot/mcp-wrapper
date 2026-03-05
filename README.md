@@ -1,44 +1,42 @@
-# mcp-wrapper
+# mcp-multiplexer
 
-MCP server to wrap duplicate commands and tools with server name prefix, preventing naming collisions when using multiple MCP servers.
+MCP 服务器多路复用器——将多个 MCP 服务器合并为一个，自动为工具名添加服务器前缀以避免命名冲突。
 
-## Features
+## 功能
 
-- **Tool Name Prefixing**: Automatically prefixes tool names with the server name (e.g., `serverName__toolName`)
-- **Multiple Server Support**: Connect to multiple underlying MCP servers
-- **Transparent Proxying**: Routes tool calls to the correct underlying server
-- **Customizable Separator**: Configure the separator between server name and tool name
-- **CLI Support**: Run directly via `npx` without creating a wrapper script
+- **工具名前缀**：自动为工具名添加服务器名前缀（如 `serverName__toolName`）
+- **多服务器支持**：同时连接多个底层 MCP 服务器
+- **透明代理**：将工具调用路由到正确的底层服务器
+- **自定义分隔符**：可配置服务器名与工具名之间的分隔符
+- **CLI 支持**：通过 `npx` 直接运行，无需编写脚本
 
-## Installation
-
-```bash
-npm install mcp-wrapper
-```
-
-## Usage
-
-### CLI Usage (No Script File Required)
-
-You can run the wrapper directly via `npx` without creating any script files:
+## 安装
 
 ```bash
-# Using a config file
-npx mcp-wrapper --config ./mcp-wrapper.json
-
-# Using inline JSON config
-npx mcp-wrapper --config '{"name":"my-wrapper","version":"1.0.0","servers":[{"name":"github","command":"npx","args":["-y","@modelcontextprotocol/server-github"]}]}'
-
-# Using environment variable
-export MCP_WRAPPER_CONFIG='{"name":"my-wrapper","version":"1.0.0","servers":[...]}'
-npx mcp-wrapper
+npm install mcp-multiplexer
 ```
 
-Example config file (`mcp-wrapper.json`):
+## 使用方法
+
+### CLI 用法（推荐，无需脚本文件）
+
+```bash
+# 使用配置文件
+npx mcp-multiplexer --config ./config.json
+
+# 使用内联 JSON
+npx mcp-multiplexer --config '{"name":"my-mux","version":"1.0.0","servers":[{"name":"github","command":"npx","args":["-y","@modelcontextprotocol/server-github"]}]}'
+
+# 使用环境变量
+export MCP_WRAPPER_CONFIG='{"name":"my-mux","version":"1.0.0","servers":[...]}'
+npx mcp-multiplexer
+```
+
+配置文件示例（`config.json`）：
 
 ```json
 {
-  "name": "my-wrapper",
+  "name": "my-mux",
   "version": "1.0.0",
   "separator": "__",
   "servers": [
@@ -62,13 +60,13 @@ Example config file (`mcp-wrapper.json`):
 }
 ```
 
-### Programmatic Usage
+### 编程用法
 
 ```typescript
-import { McpWrapper } from "mcp-wrapper";
+import { McpWrapper } from "mcp-multiplexer";
 
 const wrapper = new McpWrapper({
-  name: "my-wrapper",
+  name: "my-mux",
   version: "1.0.0",
   servers: [
     {
@@ -87,65 +85,43 @@ const wrapper = new McpWrapper({
       url: "http://localhost:3000/sse",
     },
   ],
-  separator: "__", // optional, default is "__"
+  separator: "__", // 可选，默认为 "__"
 });
 
-// Connect to all underlying servers
+// 连接所有底层服务器
 await wrapper.connectToServers();
 
-// Start the wrapper server
+// 启动多路复用服务器
 await wrapper.start();
 ```
 
-### Configuration
-
-The wrapper is configured using a `WrapperConfig` object:
+### 配置说明
 
 ```typescript
 interface WrapperConfig {
-  // Name of this wrapper server
-  name: string;
-
-  // Version of this wrapper server
-  version: string;
-
-  // List of MCP servers to wrap
-  servers: WrappedServerConfig[];
-
-  // Separator used between server name and tool name (default: "__")
-  separator?: string;
+  name: string;                    // 多路复用服务器名称
+  version?: string;                // 版本号（默认 "1.0.0"）
+  servers: WrappedServerConfig[];  // 底层 MCP 服务器列表
+  separator?: string;              // 分隔符（默认 "__"）
 }
 
 interface WrappedServerConfig {
-  // Unique prefix name for this server
-  name: string;
-
-  // Command to execute to start the MCP server (for stdio transport)
-  // Either command or url must be specified, but not both
-  command?: string;
-
-  // Arguments to pass to the command (only used with command)
-  args?: string[];
-
-  // Environment variables for the server process (only used with command)
-  env?: Record<string, string>;
-
-  // Working directory for the server process (only used with command)
-  cwd?: string;
-
-  // URL to connect to the MCP server (for SSE transport)
-  // Either command or url must be specified, but not both
-  url?: string;
+  name: string;                    // 此服务器的唯一前缀名
+  command?: string;                // 启动命令（stdio 传输）
+  args?: string[];                 // 命令参数
+  env?: Record<string, string>;    // 环境变量
+  cwd?: string;                    // 工作目录
+  url?: string;                    // MCP 服务器 URL（HTTP 传输）
 }
 ```
 
-#### Server Types
+> `command` 和 `url` 必须二选一，不可同时指定或同时缺省。
 
-The wrapper supports two types of MCP server connections:
+#### 服务器类型
 
-**1. Stdio-based servers (using `command`)**
+**1. Stdio 服务器（使用 `command`）**
 
-These servers are started as child processes and communicate via stdin/stdout. This is the traditional MCP server approach.
+作为子进程启动，通过 stdin/stdout 通信：
 
 ```json
 {
@@ -156,9 +132,9 @@ These servers are started as child processes and communicate via stdin/stdout. T
 }
 ```
 
-**2. HTTP-based servers (using `url`)**
+**2. HTTP 服务器（使用 `url`）**
 
-These servers are accessed via HTTP. The wrapper automatically tries **Streamable HTTP** (the modern MCP protocol used by VS Code, Claude, and most MCP servers) first, and falls back to **SSE** (legacy protocol) if needed. Useful for connecting to remote MCP servers or servers running in containers.
+通过 HTTP 访问。自动优先尝试 Streamable HTTP（现代协议），失败则回退到 SSE（旧协议）：
 
 ```json
 {
@@ -167,280 +143,72 @@ These servers are accessed via HTTP. The wrapper automatically tries **Streamabl
 }
 ```
 
-Examples of supported URLs:
-- `https://nuxt.com/mcp` - Nuxt's public MCP server (works with Streamable HTTP)
-- `http://localhost:3000/mcp` - Your local MCP server
-- `http://localhost:3000/sse` - Legacy SSE endpoint (automatically detected)
+### 在 Claude Desktop 中使用
 
-**Important:** The `url` must point to an actual MCP server endpoint. If you receive a `405 (Method Not Allowed)` or `404 (Not Found)` error, verify that:
-- The URL is correct and the server is running
-- The endpoint implements the MCP protocol (Streamable HTTP or SSE)
-- You're using the correct path (typically ending in `/mcp`, `/sse`, or similar)
+**方法一：CLI + 配置文件（推荐）**
 
-**Note:** Each server must specify either `command` or `url`, but not both. You can mix both types of servers in the same wrapper configuration.
-
-### Example: Using with Claude Desktop
-
-**Option 1: Using CLI with config file (Recommended - No script file needed)**
-
-Create a config file `~/.config/mcp-wrapper.json`:
-```json
-{
-  "name": "wrapped-servers",
-  "version": "1.0.0",
-  "servers": [
-    {
-      "name": "github1",
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-github"],
-      "env": { "GITHUB_TOKEN": "your_token_1" }
-    },
-    {
-      "name": "github2",
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-github"],
-      "env": { "GITHUB_TOKEN": "your_token_2" }
-    }
-  ]
-}
-```
-
-Then add to Claude Desktop configuration:
 ```json
 {
   "mcpServers": {
-    "wrapped-servers": {
+    "my-mux": {
       "command": "npx",
-      "args": ["-y", "mcp-wrapper", "--config", "~/.config/mcp-wrapper.json"]
+      "args": ["-y", "mcp-multiplexer", "--config", "/path/to/config.json"]
     }
   }
 }
 ```
 
-**Option 2: Using inline JSON config (No files needed at all)**
+**方法二：内联 JSON（无需任何文件）**
 
 ```json
 {
   "mcpServers": {
-    "wrapped-servers": {
+    "my-mux": {
       "command": "npx",
-      "args": ["-y", "mcp-wrapper", "--config", "{\"name\":\"wrapped\",\"version\":\"1.0.0\",\"servers\":[{\"name\":\"github1\",\"command\":\"npx\",\"args\":[\"-y\",\"@modelcontextprotocol/server-github\"],\"env\":{\"GITHUB_TOKEN\":\"token1\"}},{\"name\":\"github2\",\"command\":\"npx\",\"args\":[\"-y\",\"@modelcontextprotocol/server-github\"],\"env\":{\"GITHUB_TOKEN\":\"token2\"}}]}"]
+      "args": ["-y", "mcp-multiplexer", "--config", "{\"name\":\"my-mux\",\"version\":\"1.0.0\",\"servers\":[{\"name\":\"github1\",\"command\":\"npx\",\"args\":[\"-y\",\"@modelcontextprotocol/server-github\"],\"env\":{\"GITHUB_TOKEN\":\"token1\"}}]}"]
     }
   }
 }
 ```
 
-**Option 3: Using a wrapper script**
+### 在 VS Code（GitHub Copilot）中使用
 
-Add the wrapper to your Claude Desktop configuration:
-
-```json
-{
-  "mcpServers": {
-    "wrapped-servers": {
-      "command": "node",
-      "args": ["/path/to/your/wrapper-script.js"]
-    }
-  }
-}
-```
-
-Where `wrapper-script.js` contains:
-
-```javascript
-import { McpWrapper } from "mcp-wrapper";
-
-const wrapper = new McpWrapper({
-  name: "wrapped-servers",
-  version: "1.0.0",
-  servers: [
-    {
-      name: "github1",
-      command: "npx",
-      args: ["-y", "@modelcontextprotocol/server-github"],
-      env: { GITHUB_TOKEN: process.env.GITHUB_TOKEN_1 },
-    },
-    {
-      name: "github2",
-      command: "npx",
-      args: ["-y", "@modelcontextprotocol/server-github"],
-      env: { GITHUB_TOKEN: process.env.GITHUB_TOKEN_2 },
-    },
-  ],
-});
-
-await wrapper.connectToServers();
-await wrapper.start();
-```
-
-> **Note:**  
-> The script example above uses environment variables (`GITHUB_TOKEN_1`, `GITHUB_TOKEN_2`) to provide authentication tokens.  
-> You can set these in the `env` section of Claude Desktop's MCP server configuration:
->   ```json
->   {
->     "mcpServers": {
->       "wrapped-servers": {
->         "command": "node",
->         "args": ["/path/to/your/wrapper-script.js"],
->         "env": {
->           "GITHUB_TOKEN_1": "your_token_1",
->           "GITHUB_TOKEN_2": "your_token_2"
->         }
->       }
->     }
->   }
->   ```
-
-### Example: Using with VS Code (GitHub Copilot)
-
-**Option 1: Using CLI with config file (Recommended - No script file needed)**
-
-Create a config file `mcp-wrapper.json` in your project or home directory, then create `.vscode/mcp.json`:
+在工作区创建 `.vscode/mcp.json`：
 
 ```json
 {
   "servers": {
-    "wrapped-servers": {
+    "my-mux": {
       "command": "npx",
-      "args": ["-y", "mcp-wrapper", "--config", "/path/to/mcp-wrapper.json"]
+      "args": ["-y", "mcp-multiplexer", "--config", "/path/to/config.json"]
     }
   }
 }
 ```
 
-**Option 2: Using a wrapper script**
-
-Create a `.vscode/mcp.json` file in your workspace:
-
-```json
-{
-  "servers": {
-    "wrapped-servers": {
-      "command": "node",
-      "args": ["/path/to/your/wrapper-script.mjs"],
-      "env": {
-        "GITHUB_TOKEN_1": "your_token_1",
-        "GITHUB_TOKEN_2": "your_token_2"
-      }
-    }
-  }
-}
-```
-
-Where `wrapper-script.mjs` contains:
-
-```javascript
-import { McpWrapper } from "mcp-wrapper";
-
-const wrapper = new McpWrapper({
-  name: "wrapped-servers",
-  version: "1.0.0",
-  servers: [
-    {
-      name: "github1",
-      command: "npx",
-      args: ["-y", "@modelcontextprotocol/server-github"],
-      env: { GITHUB_TOKEN: process.env.GITHUB_TOKEN_1 },
-    },
-    {
-      name: "github2",
-      command: "npx",
-      args: ["-y", "@modelcontextprotocol/server-github"],
-      env: { GITHUB_TOKEN: process.env.GITHUB_TOKEN_2 },
-    },
-  ],
-});
-
-await wrapper.connectToServers();
-await wrapper.start();
-```
-
-Alternatively, you can configure MCP servers globally in VS Code settings (`settings.json`):
-
-```json
-{
-  "github.copilot.chat.mcp.servers": {
-    "wrapped-servers": {
-      "command": "npx",
-      "args": ["-y", "mcp-wrapper", "--config", "/path/to/mcp-wrapper.json"]
-    }
-  }
-}
-```
-
-Now tools from both GitHub servers will be available with prefixed names:
+配置完成后，所有底层服务器的工具都会以前缀名形式出现：
 - `github1__create_issue`
 - `github1__list_pull_requests`
 - `github2__create_issue`
 - `github2__list_pull_requests`
 
-## Troubleshooting
+## 错误处理与容错
 
-### HTTP Connection Errors
+### 优雅降级
 
-The wrapper automatically tries **Streamable HTTP** (modern protocol) first, then falls back to **SSE** (legacy) if needed.
+当部分底层服务器连接失败时：
+- 复用器会**继续启动**，使用已成功连接的服务器
+- 失败的连接信息会输出到 stderr
+- 已连接服务器的工具仍然可用
+- 客户端（Claude Desktop、VS Code 等）可以正常初始化
 
-**HTTP 405 (Method Not Allowed)**
-```
-Failed to connect to server "xxx": HTTP 405 (Method Not Allowed)
-```
-This error means the URL doesn't support MCP transports. Common causes:
-- The URL points to a documentation page or website instead of an MCP server
-- The endpoint doesn't implement the MCP protocol
-- You're using the wrong path
+### 连接超时
 
-**Solution:** Verify that the URL points to an actual MCP server endpoint (typically ending in `/mcp`, `/sse`, or similar).
+每个底层服务器有 **30 秒连接超时**，防止因服务器无响应导致复用器卡死。
 
-**HTTP 404 (Not Found)**
-```
-Failed to connect to server "xxx": HTTP 404 (Not Found)
-```
-This error means the endpoint doesn't exist. Common causes:
-- Typo in the URL
-- The server is not running
-- Incorrect path
+### 示例场景
 
-**Solution:** Double-check the URL and ensure the MCP server is running and accessible.
-
-**Supported Remote Servers**
-
-The wrapper now supports the same remote MCP servers as VS Code and Claude:
-- ✅ `https://nuxt.com/mcp` - Nuxt's public MCP server (Streamable HTTP)
-- ✅ Any MCP server implementing Streamable HTTP or SSE transports
-- ✅ Local MCP servers at `http://localhost:XXXX/mcp`
-
-**General Connection Tips**
-
-If you're having trouble connecting to a remote server:
-1. Test basic connectivity to the endpoint (does not test MCP protocol): `curl http://your-server-url/mcp`
-   For Streamable HTTP MCP endpoints, test protocol support with: `curl -X POST http://your-server-url/mcp`
-2. Check that the URL is correct and includes the proper path
-3. Ensure your network allows outbound HTTP/HTTPS connections
-4. For local servers, make sure you're using the correct host and port
-## Error Handling and Resilience
-
-The wrapper is designed to be resilient to server connection failures:
-
-### Graceful Degradation
-
-If one or more child servers fail to connect:
-- The wrapper will **continue starting** with the servers that connected successfully
-- Failed connections are logged to stderr with detailed error messages
-- Tools from successfully connected servers remain available
-- The wrapper can operate with a subset of configured servers
-
-This ensures that:
-- A single misconfigured or unavailable server doesn't prevent the wrapper from starting
-- Clients (like Google Antigravity, Claude Desktop, VS Code) can initialize successfully
-- You get clear visibility into which servers are working and which failed
-
-### Connection Timeout
-
-Each child server connection has a **30-second timeout** to prevent the wrapper from hanging indefinitely on unresponsive servers. If a server doesn't respond within this time, the connection is aborted and the wrapper continues with other servers.
-
-### Example Scenarios
-
-**Scenario 1**: One server fails, others succeed
+**场景一**：部分服务器失败
 ```
 Failed to connect to server "unavailable": Error: spawn ENOENT
 Skipping server "unavailable", will continue with remaining servers
@@ -450,53 +218,61 @@ Successfully connected to 2 server(s)
 Failed to connect to 1 server(s): unavailable
 ```
 
-**Scenario 2**: All servers fail
+**场景二**：所有服务器失败
 ```
 Failed to connect to server "server1": Error: spawn ENOENT
-Skipping server "server1", will continue with remaining servers
 Failed to connect to server "server2": Connection timeout after 30000ms
-Skipping server "server2", will continue with remaining servers
 Successfully connected to 0 server(s)
 Failed to connect to 2 server(s): server1, server2
 ```
 
-Even in scenario 2, the wrapper starts successfully (with 0 tools) rather than crashing, allowing clients to complete initialization and receive clear error messages.
+即使在场景二中，复用器也能正常启动（0 个工具），客户端可以完成初始化并收到清晰的错误信息。
+
+## 故障排除
+
+### HTTP 连接错误
+
+**HTTP 405（Method Not Allowed）**：URL 不支持 MCP 协议，请检查是否指向了正确的 MCP 端点。
+
+**HTTP 404（Not Found）**：端点不存在，请检查 URL 是否正确、服务器是否在运行。
 
 ## API
 
 ### McpWrapper
 
-The main class for creating a wrapper server.
-
-#### Constructor
+主类，用于创建多路复用服务器。
 
 ```typescript
 new McpWrapper(config: WrapperConfig)
 ```
 
-#### Methods
+#### 方法
 
-- `connectToServers(): Promise<void>` - Connects to all configured underlying MCP servers
-- `start(): Promise<void>` - Starts the wrapper server using stdio transport
-- `close(): Promise<void>` - Closes all connections and stops the server
-- `getWrappedTools(): Array<WrappedToolInfo>` - Returns information about all wrapped tools
+- `connectToServers(): Promise<void>` — 连接所有配置的底层 MCP 服务器
+- `start(): Promise<void>` — 通过 stdio 传输启动多路复用服务器
+- `close(): Promise<void>` — 关闭所有连接并停止服务器
+- `getWrappedTools(): Array<WrappedToolInfo>` — 返回所有已包装工具的信息
+- `reconnectServer(name: string): Promise<{success, message}>` — 尝试重连失败的服务器
 
-### Utility Functions
+### 工具函数
 
 ```typescript
-// Create a prefixed tool name
+// 创建带前缀的工具名
 prefixToolName(serverName: string, toolName: string, separator?: string): string
 
-// Parse a prefixed tool name
+// 解析带前缀的工具名
 parseToolName(prefixedName: string, separator?: string): { serverName: string; originalName: string } | null
 
-// Validate server name (doesn't contain separator)
+// 验证服务器名（不包含分隔符）
 isValidServerName(serverName: string, separator?: string): boolean
 
-// Validate tool name (doesn't contain separator)
+// 验证工具名（不包含分隔符）
 isValidToolName(toolName: string, separator?: string): boolean
+
+// 获取 Windows 上需要补充的环境变量
+getSupplementalEnv(): Record<string, string>
 ```
 
-## License
+## 许可证
 
 Apache-2.0

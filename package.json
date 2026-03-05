@@ -1,12 +1,12 @@
 {
-  "name": "mcp-wrapper",
+  "name": "mcp-multiplexer",
   "version": "1.0.0",
-  "description": "MCP server to wrap duplicate commands and tools with server name prefix",
+  "description": "MCP 服务器多路复用器——将多个 MCP 服务器合并为一个，自动为工具名添加服务器前缀以避免命名冲突",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "mcp-wrapper": "dist/cli.js"
+    "mcp-multiplexer": "dist/cli.js"
   },
   "files": [
     "dist"
@@ -21,11 +21,22 @@
   "keywords": [
     "mcp",
     "model-context-protocol",
+    "multiplexer",
     "wrapper",
-    "tools"
+    "tools",
+    "copilot",
+    "claude"
   ],
-  "author": "",
+  "author": "埃博拉酱-机器人",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ebola-Chan-bot/mcp-wrapper.git"
+  },
+  "homepage": "https://github.com/Ebola-Chan-bot/mcp-wrapper#readme",
+  "bugs": {
+    "url": "https://github.com/Ebola-Chan-bot/mcp-wrapper/issues"
+  },
   "engines": {
     "node": ">=18"
   },
